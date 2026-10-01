@@ -1,0 +1,2 @@
+Time_s,Force_N,RPM,Torque_Nm,Power_W,Horsepower_hp,Tin_C,Tout_C,DeltaT_C,Flow_Lmin
+0,100,314.159265358979,30.48,9575.57440814169,12.8410567946855,20,30,10,80

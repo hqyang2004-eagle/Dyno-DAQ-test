@@ -1,0 +1,973 @@
+%% ========================================================================
+%  ME486C FSAE DYNAMOMETER
+%  SIMULINK DAQ TEST VERSION - MATLAB ANALYSIS SCRIPT
+%
+%  File:
+%       ME486C_Dyno_Test_Analysis.m
+%
+%  Simulink Model:
+%       ME486C_Dyno_DAQ_Test_Version.slx
+%
+%  Purpose:
+%  --------
+%  This script:
+%
+%   1. Finds and loads the Simulink test model
+%   2. Runs the 20-second simulation
+%   3. Verifies all required logged signals
+%   4. Extracts data from Simulink.SimulationOutput
+%   5. Checks sample timing
+%   6. Creates a MATLAB table
+%   7. Saves the complete dataset as CSV
+%   8. Performs automatic PASS / FAIL checks
+%   9. Prints a test summary
+%  10. Generates engineering plots
+%
+%
+%  CURRENT SIMULATED INPUTS:
+%
+%       Force_N    = 100 N
+%       RPM        = 3000 rpm
+%       Tin_C      = 20 degC
+%       Tout_C     = 30 degC
+%       Flow_Lmin  = 80 L/min
+%
+%
+%  CURRENT CALCULATIONS:
+%
+%       Torque:
+%           T = F * L
+%
+%       Angular velocity:
+%           omega = RPM * 2*pi/60
+%
+%       Power:
+%           P = T * omega
+%
+%       Horsepower:
+%           HP = P / 745.699872
+%
+%       Temperature rise:
+%           DeltaT = Tout - Tin
+%
+%
+%  IMPORTANT:
+%  ----------
+%  THIS IS A SIMULATED SOFTWARE TEST.
+%
+%  The generated CSV file is NOT experimental dynamometer data.
+%
+% ========================================================================
+
+
+%% 1. CLEAN MATLAB ENVIRONMENT
+
+clc;
+close all;
+
+fprintf('\n');
+fprintf('============================================================\n');
+fprintf(' ME486C FSAE DYNAMOMETER\n');
+fprintf(' SIMULINK DAQ TEST VERSION\n');
+fprintf('============================================================\n\n');
+
+
+%% 2. MODEL NAME
+
+modelName = 'ME486C_Dyno_DAQ_Test_Version';
+
+modelFileName = [modelName '.slx'];
+
+
+%% 3. FIND SCRIPT FOLDER
+
+% Get the location of this MATLAB script.
+scriptFullPath = mfilename('fullpath');
+
+if isempty(scriptFullPath)
+
+    error(['Please save this MATLAB script before running it.']);
+
+end
+
+scriptFolder = fileparts(scriptFullPath);
+
+modelFullPath = fullfile( ...
+    scriptFolder, ...
+    modelFileName);
+
+
+%% 4. CHECK THAT SIMULINK MODEL EXISTS
+
+if ~isfile(modelFullPath)
+
+    error( ...
+        ['Cannot find the Simulink model:' newline ...
+         modelFullPath newline newline ...
+         'Place the .m script and .slx model in the same folder.']);
+
+end
+
+fprintf('Model file found:\n');
+fprintf('%s\n\n', modelFullPath);
+
+
+%% 5. LOAD SIMULINK MODEL
+
+try
+
+    load_system(modelFullPath);
+
+catch ME
+
+    fprintf('\nERROR: Could not load Simulink model.\n');
+    fprintf('%s\n', ME.message);
+
+    rethrow(ME);
+
+end
+
+fprintf('Simulink model loaded successfully.\n\n');
+
+
+%% 6. RUN SIMULATION
+
+fprintf('Running Simulink model...\n');
+
+try
+
+    out = sim(modelName);
+
+catch ME
+
+    fprintf('\n');
+    fprintf('SIMULATION FAILED.\n\n');
+
+    fprintf('MATLAB / Simulink error:\n');
+    fprintf('%s\n\n', ME.message);
+
+    rethrow(ME);
+
+end
+
+fprintf('Simulation completed successfully.\n\n');
+
+
+%% 7. REQUIRED LOGGED SIGNALS
+
+requiredSignals = { ...
+    'Force_log', ...
+    'RPM_log', ...
+    'Torque_log', ...
+    'Power_log', ...
+    'HP_log', ...
+    'Tin_log', ...
+    'Tout_log', ...
+    'DeltaT_log', ...
+    'Flow_log'};
+
+
+%% 8. CHECK SIMULATION OUTPUT CONTENTS
+
+fprintf('Checking Simulink output signals...\n');
+
+% "who" returns all logged variables stored inside the
+% Simulink.SimulationOutput object.
+
+availableSignals = who(out);
+
+
+for i = 1:length(requiredSignals)
+
+    signalName = requiredSignals{i};
+
+    if ~ismember(signalName, availableSignals)
+
+        error( ...
+            ['Missing Simulink output: ' signalName newline ...
+             'Check the corresponding To Workspace block.']);
+
+    end
+
+end
+
+fprintf('All required output signals were found.\n\n');
+
+
+%% 9. GET LOGGED SIGNALS FROM "out"
+
+ForceTS = get(out, 'Force_log');
+
+RPMTS = get(out, 'RPM_log');
+
+TorqueTS = get(out, 'Torque_log');
+
+PowerTS = get(out, 'Power_log');
+
+HPTS = get(out, 'HP_log');
+
+TinTS = get(out, 'Tin_log');
+
+ToutTS = get(out, 'Tout_log');
+
+DeltaTTS = get(out, 'DeltaT_log');
+
+FlowTS = get(out, 'Flow_log');
+
+
+%% 10. VERIFY LOGGING FORMAT
+
+% The To Workspace blocks in the Simulink test model should use
+% "Timeseries" as the save format.
+
+loggedSignals = { ...
+    ForceTS, ...
+    RPMTS, ...
+    TorqueTS, ...
+    PowerTS, ...
+    HPTS, ...
+    TinTS, ...
+    ToutTS, ...
+    DeltaTTS, ...
+    FlowTS};
+
+
+for i = 1:length(loggedSignals)
+
+    if ~isa(loggedSignals{i}, 'timeseries')
+
+        error( ...
+            ['Logged signal #' num2str(i) ...
+             ' is not a timeseries.' newline ...
+             'Set every To Workspace block Save Format to Timeseries.']);
+
+    end
+
+end
+
+fprintf('All logged signals use Timeseries format.\n\n');
+
+
+%% 11. EXTRACT TIME VECTOR
+
+% Force is used as the master time reference.
+
+time_s = ForceTS.Time(:);
+
+
+%% 12. EXTRACT DATA
+
+force_N = ForceTS.Data(:);
+
+rpm = RPMTS.Data(:);
+
+torque_Nm = TorqueTS.Data(:);
+
+power_W = PowerTS.Data(:);
+
+horsepower_hp = HPTS.Data(:);
+
+Tin_C = TinTS.Data(:);
+
+Tout_C = ToutTS.Data(:);
+
+deltaT_C = DeltaTTS.Data(:);
+
+flow_Lmin = FlowTS.Data(:);
+
+
+%% 13. CHECK NUMBER OF SAMPLES
+
+numberOfSamples = length(time_s);
+
+signalLengths = [ ...
+    length(force_N), ...
+    length(rpm), ...
+    length(torque_Nm), ...
+    length(power_W), ...
+    length(horsepower_hp), ...
+    length(Tin_C), ...
+    length(Tout_C), ...
+    length(deltaT_C), ...
+    length(flow_Lmin)];
+
+
+if any(signalLengths ~= numberOfSamples)
+
+    error( ...
+        ['Logged signals do not contain the same number of samples.' ...
+         newline ...
+         'Check Simulink sample times and To Workspace settings.']);
+
+end
+
+
+fprintf('Number of samples recorded: %d\n', ...
+    numberOfSamples);
+
+
+%% 14. CHECK THAT ALL CHANNELS USE THE SAME TIME VECTOR
+
+timeSeriesList = { ...
+    RPMTS, ...
+    TorqueTS, ...
+    PowerTS, ...
+    HPTS, ...
+    TinTS, ...
+    ToutTS, ...
+    DeltaTTS, ...
+    FlowTS};
+
+
+for i = 1:length(timeSeriesList)
+
+    comparisonTime = timeSeriesList{i}.Time(:);
+
+    if length(comparisonTime) ~= length(time_s)
+
+        error('Logged channels do not share the same time vector.');
+
+    end
+
+    if any(abs(comparisonTime - time_s) > 1e-10)
+
+        error('Logged channels are not synchronized in simulation time.');
+
+    end
+
+end
+
+fprintf('All channels use the same simulation time base.\n\n');
+
+
+%% 15. CALCULATE SAMPLE RATE
+
+if numberOfSamples > 1
+
+    samplePeriods_s = diff(time_s);
+
+    averageSamplePeriod_s = mean(samplePeriods_s);
+
+    loggingFrequency_Hz = ...
+        1 / averageSamplePeriod_s;
+
+else
+
+    averageSamplePeriod_s = NaN;
+
+    loggingFrequency_Hz = NaN;
+
+end
+
+
+fprintf('Average sample period: %.5f s\n', ...
+    averageSamplePeriod_s);
+
+fprintf('Logging frequency:     %.2f Hz\n\n', ...
+    loggingFrequency_Hz);
+
+
+%% 16. CREATE MATLAB TABLE
+
+DynoTestTable = table( ...
+    time_s, ...
+    force_N, ...
+    rpm, ...
+    torque_Nm, ...
+    power_W, ...
+    horsepower_hp, ...
+    Tin_C, ...
+    Tout_C, ...
+    deltaT_C, ...
+    flow_Lmin, ...
+    'VariableNames', { ...
+        'Time_s', ...
+        'Force_N', ...
+        'RPM', ...
+        'Torque_Nm', ...
+        'Power_W', ...
+        'Horsepower_hp', ...
+        'Tin_C', ...
+        'Tout_C', ...
+        'DeltaT_C', ...
+        'Flow_Lmin'});
+
+
+fprintf('MATLAB table created successfully.\n\n');
+
+
+%% 17. DISPLAY FIRST FIVE DATA ROWS
+
+fprintf('First five rows of simulation data:\n\n');
+
+numberRowsToDisplay = min(5, height(DynoTestTable));
+
+disp(DynoTestTable(1:numberRowsToDisplay, :));
+
+
+%% 18. CREATE RESULTS FOLDER
+
+resultsFolder = fullfile( ...
+    scriptFolder, ...
+    'ME486C_Test_Results');
+
+
+if ~exist(resultsFolder, 'dir')
+
+    mkdir(resultsFolder);
+
+end
+
+
+%% 19. CREATE TIMESTAMP FOR OUTPUT FILES
+
+timeStamp = datestr( ...
+    now, ...
+    'yyyy-mm-dd_HHMMSS');
+
+
+%% 20. SAVE COMPLETE DATASET TO CSV
+
+csvFileName = [ ...
+    'ME486C_SIMULATED_Test_' ...
+    timeStamp ...
+    '.csv'];
+
+
+csvFullPath = fullfile( ...
+    resultsFolder, ...
+    csvFileName);
+
+
+writetable( ...
+    DynoTestTable, ...
+    csvFullPath);
+
+
+fprintf('CSV file saved successfully:\n');
+fprintf('%s\n\n', csvFullPath);
+
+
+%% 21. EXPECTED TEST VALUES
+
+% --------------------------------------------------------------
+% Current Simulink test inputs
+% --------------------------------------------------------------
+
+expectedForce_N = 100.0;
+
+expectedRPM = 3000.0;
+
+expectedTin_C = 20.0;
+
+expectedTout_C = 30.0;
+
+expectedFlow_Lmin = 80.0;
+
+
+% --------------------------------------------------------------
+% Torque arm
+%
+% 12.000 in = 0.3048 m
+% --------------------------------------------------------------
+
+torqueArmLength_m = 0.3048;
+
+
+% --------------------------------------------------------------
+% Expected Torque
+% --------------------------------------------------------------
+
+expectedTorque_Nm = ...
+    expectedForce_N * torqueArmLength_m;
+
+
+% --------------------------------------------------------------
+% Expected Angular Velocity
+% --------------------------------------------------------------
+
+expectedAngularVelocity_rad_s = ...
+    expectedRPM * 2*pi / 60;
+
+
+% --------------------------------------------------------------
+% Expected Power
+% --------------------------------------------------------------
+
+expectedPower_W = ...
+    expectedTorque_Nm ...
+    * expectedAngularVelocity_rad_s;
+
+
+% --------------------------------------------------------------
+% Expected Horsepower
+% --------------------------------------------------------------
+
+wattsPerHorsepower = 745.699872;
+
+expectedHorsepower_hp = ...
+    expectedPower_W ...
+    / wattsPerHorsepower;
+
+
+% --------------------------------------------------------------
+% Expected Delta T
+% --------------------------------------------------------------
+
+expectedDeltaT_C = ...
+    expectedTout_C ...
+    - expectedTin_C;
+
+
+%% 22. AUTOMATIC PASS / FAIL TOLERANCE
+
+% This is a deterministic simulation sanity check.
+%
+% The relative tolerance allows for small floating-point differences.
+
+relativeTolerance = 1e-4;
+
+absoluteTolerance = 1e-6;
+
+
+%% 23. AUTOMATIC PASS / FAIL TEST
+
+testNames = { ...
+    'Force', ...
+    'RPM', ...
+    'Torque', ...
+    'Power', ...
+    'Horsepower', ...
+    'Tin', ...
+    'Tout', ...
+    'Delta T', ...
+    'Flow'};
+
+
+expectedValues = [ ...
+    expectedForce_N, ...
+    expectedRPM, ...
+    expectedTorque_Nm, ...
+    expectedPower_W, ...
+    expectedHorsepower_hp, ...
+    expectedTin_C, ...
+    expectedTout_C, ...
+    expectedDeltaT_C, ...
+    expectedFlow_Lmin];
+
+
+actualSignals = { ...
+    force_N, ...
+    rpm, ...
+    torque_Nm, ...
+    power_W, ...
+    horsepower_hp, ...
+    Tin_C, ...
+    Tout_C, ...
+    deltaT_C, ...
+    flow_Lmin};
+
+
+testResults = false( ...
+    length(testNames), ...
+    1);
+
+
+maxErrors = zeros( ...
+    length(testNames), ...
+    1);
+
+
+for i = 1:length(testNames)
+
+    expectedValue = expectedValues(i);
+
+    actualData = actualSignals{i};
+
+    allowableError = ...
+        absoluteTolerance ...
+        + relativeTolerance * abs(expectedValue);
+
+    maxErrors(i) = ...
+        max(abs(actualData - expectedValue));
+
+    testResults(i) = ...
+        maxErrors(i) <= allowableError;
+
+end
+
+
+%% 24. PRINT AUTOMATIC TEST RESULTS
+
+fprintf('\n');
+fprintf('============================================================\n');
+fprintf(' AUTOMATIC TEST CHECK\n');
+fprintf('============================================================\n');
+
+
+for i = 1:length(testNames)
+
+    if testResults(i)
+
+        fprintf('%-15s : PASS\n', ...
+            testNames{i});
+
+    else
+
+        fprintf('%-15s : FAIL   Max Error = %.6g\n', ...
+            testNames{i}, ...
+            maxErrors(i));
+
+    end
+
+end
+
+
+fprintf('------------------------------------------------------------\n');
+
+
+if all(testResults)
+
+    overallTestResult = 'PASS';
+
+    fprintf('OVERALL TEST RESULT: PASS\n');
+
+else
+
+    overallTestResult = 'FAIL';
+
+    fprintf('OVERALL TEST RESULT: FAIL\n');
+
+end
+
+
+fprintf('============================================================\n\n');
+
+
+%% 25. CALCULATE TEST SUMMARY
+
+maximumRPM = max(rpm);
+
+maximumForce_N = max(force_N);
+
+maximumTorque_Nm = max(torque_Nm);
+
+maximumPower_W = max(power_W);
+
+maximumHorsepower_hp = max(horsepower_hp);
+
+maximumTout_C = max(Tout_C);
+
+averageDeltaT_C = mean(deltaT_C);
+
+averageFlow_Lmin = mean(flow_Lmin);
+
+
+%% 26. PRINT TEST SUMMARY
+
+fprintf('============================================================\n');
+fprintf(' ME486C TEST SUMMARY\n');
+fprintf('============================================================\n');
+
+fprintf('Simulation duration:          %.2f s\n', ...
+    time_s(end));
+
+fprintf('Samples recorded:             %d\n', ...
+    numberOfSamples);
+
+fprintf('Average sample period:        %.5f s\n', ...
+    averageSamplePeriod_s);
+
+fprintf('Logging frequency:            %.2f Hz\n', ...
+    loggingFrequency_Hz);
+
+fprintf('\n');
+
+fprintf('Maximum RPM:                  %.2f rpm\n', ...
+    maximumRPM);
+
+fprintf('Maximum Force:                %.2f N\n', ...
+    maximumForce_N);
+
+fprintf('Maximum Torque:               %.2f N*m\n', ...
+    maximumTorque_Nm);
+
+fprintf('Maximum Power:                %.2f W\n', ...
+    maximumPower_W);
+
+fprintf('Maximum Horsepower:           %.2f hp\n', ...
+    maximumHorsepower_hp);
+
+fprintf('Maximum Outlet Temperature:   %.2f degC\n', ...
+    maximumTout_C);
+
+fprintf('Average Delta T:              %.2f degC\n', ...
+    averageDeltaT_C);
+
+fprintf('Average Flow Rate:            %.2f L/min\n', ...
+    averageFlow_Lmin);
+
+fprintf('\n');
+
+fprintf('Overall Test Result:          %s\n', ...
+    overallTestResult);
+
+fprintf('============================================================\n\n');
+
+
+%% 27. CREATE PASS / FAIL SUMMARY TABLE
+
+TestCheckTable = table( ...
+    string(testNames(:)), ...
+    expectedValues(:), ...
+    maxErrors, ...
+    testResults, ...
+    'VariableNames', { ...
+        'Test', ...
+        'ExpectedValue', ...
+        'MaximumError', ...
+        'Pass'});
+
+
+%% 28. SAVE PASS / FAIL TABLE
+
+summaryFileName = [ ...
+    'ME486C_Test_Check_' ...
+    timeStamp ...
+    '.csv'];
+
+
+summaryFullPath = fullfile( ...
+    resultsFolder, ...
+    summaryFileName);
+
+
+writetable( ...
+    TestCheckTable, ...
+    summaryFullPath);
+
+
+%% 29. PLOT - TORQUE VS TIME
+
+fig1 = figure;
+
+plot( ...
+    time_s, ...
+    torque_Nm, ...
+    'LineWidth', ...
+    1.5);
+
+grid on;
+
+xlabel('Time (s)');
+
+ylabel('Torque (N*m)');
+
+title('ME486C - Torque vs Time');
+
+
+saveas( ...
+    fig1, ...
+    fullfile( ...
+        resultsFolder, ...
+        ['Torque_vs_Time_' timeStamp '.png']));
+
+
+%% 30. PLOT - HORSEPOWER VS TIME
+
+fig2 = figure;
+
+plot( ...
+    time_s, ...
+    horsepower_hp, ...
+    'LineWidth', ...
+    1.5);
+
+grid on;
+
+xlabel('Time (s)');
+
+ylabel('Horsepower (hp)');
+
+title('ME486C - Horsepower vs Time');
+
+
+saveas( ...
+    fig2, ...
+    fullfile( ...
+        resultsFolder, ...
+        ['Horsepower_vs_Time_' timeStamp '.png']));
+
+
+%% 31. PLOT - WATER TEMPERATURES
+
+fig3 = figure;
+
+plot( ...
+    time_s, ...
+    Tin_C, ...
+    'LineWidth', ...
+    1.5);
+
+hold on;
+
+plot( ...
+    time_s, ...
+    Tout_C, ...
+    'LineWidth', ...
+    1.5);
+
+grid on;
+
+xlabel('Time (s)');
+
+ylabel('Temperature (degC)');
+
+title('ME486C - Water Temperatures');
+
+legend( ...
+    'T_{in}', ...
+    'T_{out}', ...
+    'Location', ...
+    'best');
+
+hold off;
+
+
+saveas( ...
+    fig3, ...
+    fullfile( ...
+        resultsFolder, ...
+        ['Water_Temperatures_' timeStamp '.png']));
+
+
+%% 32. PLOT - DELTA T
+
+fig4 = figure;
+
+plot( ...
+    time_s, ...
+    deltaT_C, ...
+    'LineWidth', ...
+    1.5);
+
+grid on;
+
+xlabel('Time (s)');
+
+ylabel('Delta T (degC)');
+
+title('ME486C - Water Temperature Rise');
+
+
+saveas( ...
+    fig4, ...
+    fullfile( ...
+        resultsFolder, ...
+        ['DeltaT_vs_Time_' timeStamp '.png']));
+
+
+%% 33. PLOT - FLOW RATE
+
+fig5 = figure;
+
+plot( ...
+    time_s, ...
+    flow_Lmin, ...
+    'LineWidth', ...
+    1.5);
+
+grid on;
+
+xlabel('Time (s)');
+
+ylabel('Flow Rate (L/min)');
+
+title('ME486C - Water Flow Rate');
+
+
+saveas( ...
+    fig5, ...
+    fullfile( ...
+        resultsFolder, ...
+        ['Flow_vs_Time_' timeStamp '.png']));
+
+
+%% 34. PLOT - TORQUE VS RPM
+
+fig6 = figure;
+
+plot( ...
+    rpm, ...
+    torque_Nm, ...
+    'o');
+
+grid on;
+
+xlabel('Engine Speed (RPM)');
+
+ylabel('Torque (N*m)');
+
+title('ME486C - Torque vs RPM');
+
+
+saveas( ...
+    fig6, ...
+    fullfile( ...
+        resultsFolder, ...
+        ['Torque_vs_RPM_' timeStamp '.png']));
+
+
+%% 35. PLOT - HORSEPOWER VS RPM
+
+fig7 = figure;
+
+plot( ...
+    rpm, ...
+    horsepower_hp, ...
+    'o');
+
+grid on;
+
+xlabel('Engine Speed (RPM)');
+
+ylabel('Horsepower (hp)');
+
+title('ME486C - Horsepower vs RPM');
+
+
+saveas( ...
+    fig7, ...
+    fullfile( ...
+        resultsFolder, ...
+        ['Horsepower_vs_RPM_' timeStamp '.png']));
+
+
+%% 36. FINAL MESSAGE
+
+fprintf('ME486C Simulink test analysis completed successfully.\n\n');
+
+fprintf('Results folder:\n');
+fprintf('%s\n\n', resultsFolder);
+
+fprintf('Generated outputs include:\n');
+fprintf('  - Full CSV dataset\n');
+fprintf('  - PASS / FAIL test CSV\n');
+fprintf('  - Torque plot\n');
+fprintf('  - Horsepower plot\n');
+fprintf('  - Temperature plot\n');
+fprintf('  - Delta T plot\n');
+fprintf('  - Flow plot\n');
+fprintf('  - Torque vs RPM plot\n');
+fprintf('  - Horsepower vs RPM plot\n');
+
+fprintf('\n');
+
+fprintf('IMPORTANT:\n');
+
+fprintf(['This version uses simulated constant inputs. ' ...
+         'It is intended to verify the Simulink/MATLAB ' ...
+         'DAQ software architecture only.\n']);
+
+fprintf(['Real Arduino and sensor inputs will replace the ' ...
+         'constant blocks during hardware integration.\n\n']);

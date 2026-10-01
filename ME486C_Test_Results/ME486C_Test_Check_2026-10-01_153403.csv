@@ -1,0 +1,10 @@
+Test,ExpectedValue,MaximumError,Pass
+Force,100,0,1
+RPM,3000,2685.84073464102,0
+Torque,30.48,0,1
+Power,9575.57440814169,0,1
+Horsepower,12.8410567946855,0,1
+Tin,20,0,1
+Tout,30,0,1
+Delta T,10,0,1
+Flow,80,0,1
